@@ -1,0 +1,154 @@
+{
+  // Paths, plugin name, and target framework are configured in settings.json.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      // Build the plugin, clean the local plugin folder, then copy debug artifacts.
+      "label": "build-and-copy",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "build",
+        "make-plugin-dir",
+        "clean-plugin-dir",
+        "copy-plugin-files"
+      ]
+    },
+    {
+      // Build the plugin. Debug installs copy build output, not publish output,
+      // so Jellyfin uses its own shared framework assemblies.
+      "label": "build",
+      "command": "dotnet",
+      "type": "shell",
+      "args": [
+        "build",
+        "${workspaceFolder}/Jellyfin.Plugin.Tissue.sln",
+        "--configuration=Debug",
+        "--framework=${config:pluginTargetFramework}",
+        "/property:GenerateFullPaths=true",
+        "/consoleloggerparameters:NoSummary"
+      ],
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "problemMatcher": "$msCompile"
+    },
+    {
+      // Ensure the plugin directory exists before trying to use it.
+      "label": "make-plugin-dir",
+      "type": "shell",
+      "command": "mkdir",
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-Command",
+          "New-Item",
+          "-ItemType",
+          "Directory",
+          "-Force",
+          "-Path",
+          "${config:jellyfinWindowsDataDir}/plugins/${config:pluginName}/"
+        ]
+      },
+      "linux": {
+        "args": [
+          "-p",
+          "${config:jellyfinLinuxDataDir}/plugins/${config:pluginName}/"
+        ]
+      },
+      "osx": {
+        "args": [
+          "-p",
+          "${config:jellyfinMacDataDir}/plugins/${config:pluginName}/"
+        ]
+      }
+    },
+    {
+      // Remove stale files from previous installs, especially old publish dependencies.
+      "label": "clean-plugin-dir",
+      "type": "shell",
+      "command": "find",
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-Command",
+          "Remove-Item -Path \"${config:jellyfinWindowsDataDir}/plugins/${config:pluginName}/*\" -Force -Recurse -ErrorAction SilentlyContinue"
+        ]
+      },
+      "linux": {
+        "args": [
+          "${config:jellyfinLinuxDataDir}/plugins/${config:pluginName}/",
+          "-mindepth",
+          "1",
+          "-delete"
+        ]
+      },
+      "osx": {
+        "args": [
+          "${config:jellyfinMacDataDir}/plugins/${config:pluginName}/",
+          "-mindepth",
+          "1",
+          "-delete"
+        ]
+      }
+    },
+    {
+      // Copy only the plugin's own debug artifacts to the Jellyfin plugin install path.
+      "label": "copy-plugin-files",
+      "type": "shell",
+      "command": "cp",
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-Command",
+          "Copy-Item -Path \"${workspaceFolder}/${config:pluginName}/bin/Debug/${config:pluginTargetFramework}/${config:pluginName}.dll\", \"${workspaceFolder}/${config:pluginName}/bin/Debug/${config:pluginTargetFramework}/${config:pluginName}.pdb\", \"${workspaceFolder}/${config:pluginName}/bin/Debug/${config:pluginTargetFramework}/${config:pluginName}.xml\", \"${workspaceFolder}/${config:pluginName}/bin/Debug/${config:pluginTargetFramework}/${config:pluginName}.deps.json\", \"${workspaceFolder}/${config:pluginName}/bin/Debug/${config:pluginTargetFramework}/jellyfin-plugin-tissue.jpg\" -Destination \"${config:jellyfinWindowsDataDir}/plugins/${config:pluginName}/\" -Force"
+        ]
+      },
+      "linux": {
+        "args": [
+          "${workspaceFolder}/${config:pluginName}/bin/Debug/${config:pluginTargetFramework}/${config:pluginName}.dll",
+          "${workspaceFolder}/${config:pluginName}/bin/Debug/${config:pluginTargetFramework}/${config:pluginName}.pdb",
+          "${workspaceFolder}/${config:pluginName}/bin/Debug/${config:pluginTargetFramework}/${config:pluginName}.xml",
+          "${workspaceFolder}/${config:pluginName}/bin/Debug/${config:pluginTargetFramework}/${config:pluginName}.deps.json",
+          "${workspaceFolder}/${config:pluginName}/bin/Debug/${config:pluginTargetFramework}/jellyfin-plugin-tissue.jpg",
+          "${config:jellyfinLinuxDataDir}/plugins/${config:pluginName}/"
+        ]
+      },
+      "osx": {
+        "args": [
+          "${workspaceFolder}/${config:pluginName}/bin/Debug/${config:pluginTargetFramework}/${config:pluginName}.dll",
+          "${workspaceFolder}/${config:pluginName}/bin/Debug/${config:pluginTargetFramework}/${config:pluginName}.pdb",
+          "${workspaceFolder}/${config:pluginName}/bin/Debug/${config:pluginTargetFramework}/${config:pluginName}.xml",
+          "${workspaceFolder}/${config:pluginName}/bin/Debug/${config:pluginTargetFramework}/${config:pluginName}.deps.json",
+          "${workspaceFolder}/${config:pluginName}/bin/Debug/${config:pluginTargetFramework}/jellyfin-plugin-tissue.jpg",
+          "${config:jellyfinMacDataDir}/plugins/${config:pluginName}/"
+        ]
+      }
+    },
+    {
+      // Optional packaging task. Use this when you intentionally want publish output;
+      // do not use publish output for local F5 plugin installs.
+      "label": "publish",
+      "command": "dotnet",
+      "type": "shell",
+      "args": [
+        "publish",
+        "${workspaceFolder}/Jellyfin.Plugin.Tissue.sln",
+        "--configuration=Release",
+        "--framework=${config:pluginTargetFramework}",
+        "/property:GenerateFullPaths=true",
+        "/consoleloggerparameters:NoSummary"
+      ],
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "problemMatcher": "$msCompile"
+    }
+  ]
+}

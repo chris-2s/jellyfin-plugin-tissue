@@ -1,0 +1,20 @@
+bin/
+obj/
+.vs/
+.idea/
+artifacts
+.artifacts/
+TestResults/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# macOS
+.DS_Store
+._*
+
+# VS Code local machine settings
+.vscode/settings.json
+.vscode/*.log
+.vscode/*.tmp

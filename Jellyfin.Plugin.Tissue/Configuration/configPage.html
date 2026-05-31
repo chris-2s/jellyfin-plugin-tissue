@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>Tissue</title>
+</head>
+<body>
+    <div id="TissueConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
+        <div data-role="content">
+            <div class="content-primary">
+                <form id="TissueConfigForm">
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="BaseUrl">服务地址</label>
+                        <input id="BaseUrl" name="BaseUrl" type="text" is="emby-input" />
+                        <div class="fieldDescription">Tissue 接口地址，例如：http://192.168.1.100:9193/api/</div>
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="ApiKey">API 密钥</label>
+                        <input id="ApiKey" name="ApiKey" type="password" is="emby-input" />
+                        <div class="fieldDescription">调用 Tissue 时会通过请求头 `X-API-Key` 发送。</div>
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="RequestTimeoutSeconds">请求超时（秒）</label>
+                        <input id="RequestTimeoutSeconds" name="RequestTimeoutSeconds" type="number" is="emby-input" min="1" />
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused">高分辨率优先</label>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="PreferHighResolution" name="PreferHighResolution" type="checkbox" is="emby-checkbox" />
+                                <span>按分辨率从高到低排序候选头像</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused">允许生效的媒体库（可多选）</label>
+                        <div id="AllowedLibraryList" class="checkboxContainer-withDescription"></div>
+                        <div id="AllowedLibraryLoadHint" class="fieldDescription">正在加载媒体库... 如果不选择任何库，将跳过 Tissue 请求。</div>
+                    </div>
+                    <div class="inputContainer" id="AllowedLibraryFallbackContainer" style="display:none;">
+                        <label class="inputLabel inputLabelUnfocused" for="AllowedLibraryNamesText">允许生效的媒体库（备用输入）</label>
+                        <input id="AllowedLibraryNamesText" name="AllowedLibraryNamesText" type="text" is="emby-input" />
+                        <div class="fieldDescription">当无法自动加载媒体库时，可用英文逗号分隔填写库名。</div>
+                    </div>
+                    <div>
+                        <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                            <span>保存</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <script type="text/javascript">
+            var TissueConfig = {
+                pluginUniqueId: 'eb5d7894-8eef-4b36-aa6f-5d124e828ce1'
+            };
+            var availableLibraryNames = [];
+
+            function uniqueSortedNames(values) {
+                var map = {};
+                (values || []).forEach(function(name) {
+                    if (!name) {
+                        return;
+                    }
+
+                    var trimmed = String(name).trim();
+                    if (!trimmed) {
+                        return;
+                    }
+
+                    map[trimmed.toLowerCase()] = trimmed;
+                });
+
+                return Object.keys(map).map(function(key) {
+                    return map[key];
+                }).sort(function(a, b) {
+                    return a.localeCompare(b);
+                });
+            }
+
+            function parseAllowedLibraryNamesText() {
+                var raw = document.querySelector('#AllowedLibraryNamesText').value || '';
+                return uniqueSortedNames(raw.split(','));
+            }
+
+            function renderLibraryCheckboxes(selectedLibraries) {
+                var selected = {};
+                (selectedLibraries || []).forEach(function(name) {
+                    selected[String(name).toLowerCase()] = true;
+                });
+
+                var container = document.querySelector('#AllowedLibraryList');
+                container.innerHTML = '';
+                availableLibraryNames.forEach(function(name) {
+                    var key = name.toLowerCase();
+                    var wrapper = document.createElement('div');
+                    wrapper.className = 'checkboxContainer checkboxContainer-withDescription';
+                    wrapper.innerHTML = '<label class="emby-checkbox-label">' +
+                        '<input type="checkbox" is="emby-checkbox" class="allowed-library-checkbox" value="' + name + '" />' +
+                        '<span>' + name + '</span>' +
+                        '</label>';
+                    container.appendChild(wrapper);
+                    wrapper.querySelector('input').checked = !!selected[key];
+                });
+            }
+
+            function getAllowedLibraryNamesFromUi() {
+                if (availableLibraryNames.length > 0) {
+                    return uniqueSortedNames(Array.prototype.slice.call(document.querySelectorAll('.allowed-library-checkbox:checked')).map(function(input) {
+                        return input.value;
+                    }));
+                }
+
+                return parseAllowedLibraryNamesText();
+            }
+
+            function setupLibrarySelector(config) {
+                var selected = uniqueSortedNames(config.AllowedLibraryNames || []);
+                var loadHint = document.querySelector('#AllowedLibraryLoadHint');
+                var fallback = document.querySelector('#AllowedLibraryFallbackContainer');
+
+                return ApiClient.getVirtualFolders().then(function(folders) {
+                    var names = (folders || []).map(function(folder) {
+                        return folder.Name;
+                    });
+                    availableLibraryNames = uniqueSortedNames(names);
+                    if (availableLibraryNames.length > 0) {
+                        renderLibraryCheckboxes(selected);
+                        loadHint.textContent = '请选择一个或多个媒体库。';
+                        fallback.style.display = 'none';
+                    } else {
+                        availableLibraryNames = [];
+                        loadHint.textContent = '未找到媒体库，请使用下方备用输入。';
+                        fallback.style.display = 'block';
+                        document.querySelector('#AllowedLibraryNamesText').value = selected.join(', ');
+                    }
+                }).catch(function() {
+                    availableLibraryNames = [];
+                    loadHint.textContent = '媒体库加载失败，请使用下方备用输入。';
+                    fallback.style.display = 'block';
+                    document.querySelector('#AllowedLibraryNamesText').value = selected.join(', ');
+                });
+            }
+
+            document.querySelector('#TissueConfigPage')
+                .addEventListener('pageshow', function() {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(TissueConfig.pluginUniqueId).then(function (config) {
+                        document.querySelector('#BaseUrl').value = config.BaseUrl || '';
+                        document.querySelector('#ApiKey').value = config.ApiKey || '';
+                        document.querySelector('#RequestTimeoutSeconds').value = config.RequestTimeoutSeconds || 60;
+                        document.querySelector('#PreferHighResolution').checked = !!config.PreferHighResolution;
+                        document.querySelector('#AllowedLibraryNamesText').value = (config.AllowedLibraryNames || []).join(', ');
+                        return setupLibrarySelector(config);
+                    }).then(function() {
+                        Dashboard.hideLoadingMsg();
+                    }).catch(function() {
+                        Dashboard.hideLoadingMsg();
+                    });
+                });
+
+            document.querySelector('#TissueConfigForm')
+                .addEventListener('submit', function(e) {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(TissueConfig.pluginUniqueId).then(function (config) {
+                        config.BaseUrl = document.querySelector('#BaseUrl').value;
+                        config.ApiKey = document.querySelector('#ApiKey').value;
+                        config.RequestTimeoutSeconds = Number(document.querySelector('#RequestTimeoutSeconds').value) || 60;
+                        config.PreferHighResolution = !!document.querySelector('#PreferHighResolution').checked;
+                        config.AllowedLibraryNames = getAllowedLibraryNamesFromUi();
+                        ApiClient.updatePluginConfiguration(TissueConfig.pluginUniqueId, config).then(function (result) {
+                            Dashboard.processPluginConfigurationUpdateResult(result);
+                        });
+                    });
+
+                    e.preventDefault();
+                    return false;
+                });
+        </script>
+    </div>
+</body>
+</html>

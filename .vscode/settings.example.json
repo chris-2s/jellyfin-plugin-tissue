@@ -1,0 +1,10 @@
+{
+    "jellyfinDir": "${workspaceFolder}/../jellyfin/Jellyfin.Server",
+    "jellyfinWebDir": "${workspaceFolder}/../jellyfin-web",
+    "jellyfinWindowsDataDir": "${env:LOCALAPPDATA}/jellyfin",
+    "jellyfinLinuxDataDir": "$HOME/.local/share/jellyfin",
+    "jellyfinMacDataDir": "$HOME/Library/Application Support/jellyfin",
+    "pluginName": "Jellyfin.Plugin.Tissue",
+    "pluginTargetFramework": "net8.0",
+    "jellyfinTargetFramework": "net10.0"
+}
