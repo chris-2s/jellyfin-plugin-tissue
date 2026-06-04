@@ -1,7 +1,7 @@
 ---
 name: "Tissue"
 guid: "eb5d7894-8eef-4b36-aa6f-5d124e828ce1"
-version: "1.0.0.0"
+version: "1.1.0.0"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "为 Jellyfin 提供演员头像补全"
@@ -13,4 +13,4 @@ owner: "Tissue 团队"
 artifacts:
 - "Jellyfin.Plugin.Tissue.dll"
 changelog: >
-  1.0.0.0：首个稳定版本，包含连接复用与媒体库门控缓存优化。
+  1.1.0.0：聚焦定期任务补全演员头像，优化库范围扫描与任务结构整理。

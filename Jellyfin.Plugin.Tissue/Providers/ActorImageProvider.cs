@@ -1,13 +1,10 @@
 using System;
 using System.Collections;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Tissue.Services;
@@ -26,33 +23,27 @@ namespace Jellyfin.Plugin.Tissue.Providers;
 public sealed class ActorImageProvider : IRemoteImageProvider
 {
     private const string ProviderDisplayName = "Tissue";
-    private static readonly TimeSpan LibraryGateCacheTtl = TimeSpan.FromMinutes(10);
-    private static readonly TimeSpan LibraryMappingsCacheTtl = TimeSpan.FromMinutes(5);
     private readonly IActorImageResolveCache _actorImageResolveCache;
     private readonly ITissueClient _tissueClient;
-    private readonly ILibraryManager _libraryManager;
+    private readonly ILibraryScopeEvaluator _libraryScopeEvaluator;
     private readonly ILogger<ActorImageProvider> _logger;
-    private readonly ConcurrentDictionary<Guid, CachedLibraryGateResult> _libraryGateCache = new();
-    private readonly object _libraryMappingsCacheLock = new();
-    private List<(string LibraryName, string RootPath)>? _cachedLibraryMappings;
-    private DateTimeOffset _cachedLibraryMappingsExpiresAt = DateTimeOffset.MinValue;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ActorImageProvider"/> class.
     /// </summary>
     /// <param name="actorImageResolveCache">Actor image resolve cache.</param>
     /// <param name="tissueClient">Tissue API client.</param>
-    /// <param name="libraryManager">Library manager instance.</param>
+    /// <param name="libraryScopeEvaluator">Library scope evaluator instance.</param>
     /// <param name="logger">Logger instance.</param>
     public ActorImageProvider(
         IActorImageResolveCache actorImageResolveCache,
         ITissueClient tissueClient,
-        ILibraryManager libraryManager,
+        ILibraryScopeEvaluator libraryScopeEvaluator,
         ILogger<ActorImageProvider> logger)
     {
         _actorImageResolveCache = actorImageResolveCache;
         _tissueClient = tissueClient;
-        _libraryManager = libraryManager;
+        _libraryScopeEvaluator = libraryScopeEvaluator;
         _logger = logger;
     }
 
@@ -85,7 +76,7 @@ public sealed class ActorImageProvider : IRemoteImageProvider
             person.Name,
             person.Id);
 
-        if (!IsPersonAllowedByLibrary(person, config))
+        if (!_libraryScopeEvaluator.IsPersonAllowed(person, config))
         {
             return [];
         }
@@ -215,174 +206,4 @@ public sealed class ActorImageProvider : IRemoteImageProvider
         proxyUri = candidateUri;
         return true;
     }
-
-    private bool IsPersonAllowedByLibrary(Person person, Configuration.PluginConfiguration config)
-    {
-        if (_libraryGateCache.TryGetValue(person.Id, out var cached) && cached.ExpiresAt > DateTimeOffset.UtcNow)
-        {
-            return cached.IsAllowed;
-        }
-
-        var configuredLibraryNames = config.AllowedLibraryNames ?? [];
-        if (configuredLibraryNames.Count == 0)
-        {
-            _logger.LogDebug(
-                "未配置允许生效的媒体库，跳过演员：{PersonName}。",
-                person.Name);
-            _libraryGateCache[person.Id] = new CachedLibraryGateResult(false, DateTimeOffset.UtcNow.Add(LibraryGateCacheTtl));
-            return false;
-        }
-
-        var allowedLibraryNames = new HashSet<string>(configuredLibraryNames.Where(static n => !string.IsNullOrWhiteSpace(n)), StringComparer.OrdinalIgnoreCase);
-        if (allowedLibraryNames.Count == 0)
-        {
-            _logger.LogDebug(
-                "允许生效的媒体库配置为空值，跳过演员：{PersonName}。",
-                person.Name);
-            _libraryGateCache[person.Id] = new CachedLibraryGateResult(false, DateTimeOffset.UtcNow.Add(LibraryGateCacheTtl));
-            return false;
-        }
-
-        try
-        {
-            var libraryPathMappings = GetOrBuildLibraryPathMappings();
-            var matchedLibraries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var relatedItem in GetRelatedItemsForPerson(person.Id))
-            {
-                if (relatedItem is not BaseItem baseItem)
-                {
-                    continue;
-                }
-
-                var typeName = baseItem.GetType().Name;
-                if (!string.Equals(typeName, "Movie", StringComparison.Ordinal) &&
-                    !string.Equals(typeName, "Series", StringComparison.Ordinal) &&
-                    !string.Equals(typeName, "Episode", StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                var matchedLibraryName = ResolveLibraryNameByItem(baseItem, libraryPathMappings);
-                if (!string.IsNullOrWhiteSpace(matchedLibraryName))
-                {
-                    matchedLibraries.Add(matchedLibraryName);
-                }
-            }
-
-            if (_logger.IsEnabled(LogLevel.Debug))
-            {
-                _logger.LogDebug(
-                    "演员 {PersonName} 关联的顶级媒体库：{Libraries}。",
-                    person.Name,
-                    string.Join(", ", matchedLibraries));
-            }
-
-            var isAllowed = matchedLibraries.Any(allowedLibraryNames.Contains);
-            if (!isAllowed)
-            {
-                _logger.LogDebug(
-                    "演员 {PersonName} 未命中允许生效的媒体库，跳过。命中库数量：{MatchedLibraryCount}。",
-                    person.Name,
-                    matchedLibraries.Count);
-            }
-
-            _libraryGateCache[person.Id] = new CachedLibraryGateResult(isAllowed, DateTimeOffset.UtcNow.Add(LibraryGateCacheTtl));
-            return isAllowed;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "计算演员 {PersonName} 的媒体库门控失败，已跳过 Tissue 请求。", person.Name);
-            _libraryGateCache[person.Id] = new CachedLibraryGateResult(false, DateTimeOffset.UtcNow.Add(TimeSpan.FromMinutes(1)));
-            return false;
-        }
-    }
-
-    private IReadOnlyList<BaseItem> GetRelatedItemsForPerson(Guid personId)
-    {
-        var query = new InternalItemsQuery
-        {
-            PersonIds = [personId],
-            Recursive = true
-        };
-        return _libraryManager.GetItemList(query);
-    }
-
-    private List<(string LibraryName, string RootPath)> GetOrBuildLibraryPathMappings()
-    {
-        var now = DateTimeOffset.UtcNow;
-        if (_cachedLibraryMappings is not null && _cachedLibraryMappingsExpiresAt > now)
-        {
-            return _cachedLibraryMappings;
-        }
-
-        lock (_libraryMappingsCacheLock)
-        {
-            if (_cachedLibraryMappings is not null && _cachedLibraryMappingsExpiresAt > now)
-            {
-                return _cachedLibraryMappings;
-            }
-
-            var mappings = _libraryManager.GetVirtualFolders()
-                .Where(static folder => !string.IsNullOrWhiteSpace(folder.Name))
-                .SelectMany(folder => (folder.Locations ?? Array.Empty<string>())
-                    .Where(static location => !string.IsNullOrWhiteSpace(location))
-                    .Select(location => (LibraryName: folder.Name, RootPath: NormalizePath(location))))
-                .Where(static x => !string.IsNullOrWhiteSpace(x.RootPath))
-                .OrderByDescending(static x => x.RootPath.Length)
-                .ToList();
-
-            _cachedLibraryMappings = mappings;
-            _cachedLibraryMappingsExpiresAt = now.Add(LibraryMappingsCacheTtl);
-            return mappings;
-        }
-    }
-
-    private static string? ResolveLibraryNameByItem(BaseItem baseItem, List<(string LibraryName, string RootPath)> mappings)
-    {
-        var path = NormalizePath(baseItem.Path);
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            path = NormalizePath(baseItem.GetTopParent()?.Path);
-        }
-
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return baseItem.GetTopParent()?.Name;
-        }
-
-        foreach (var mapping in mappings)
-        {
-            if (IsPathInRoot(path, mapping.RootPath))
-            {
-                return mapping.LibraryName;
-            }
-        }
-
-        return baseItem.GetTopParent()?.Name;
-    }
-
-    private static string NormalizePath(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return string.Empty;
-        }
-
-        return Path.TrimEndingDirectorySeparator(path.Trim());
-    }
-
-    private static bool IsPathInRoot(string path, string rootPath)
-    {
-        if (string.Equals(path, rootPath, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        var rootWithSeparator = rootPath + Path.DirectorySeparatorChar;
-        var altRootWithSeparator = rootPath + Path.AltDirectorySeparatorChar;
-        return path.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase)
-            || path.StartsWith(altRootWithSeparator, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private sealed record CachedLibraryGateResult(bool IsAllowed, DateTimeOffset ExpiresAt);
 }
