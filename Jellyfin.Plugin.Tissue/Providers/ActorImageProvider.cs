@@ -36,7 +36,6 @@ public sealed class ActorImageProvider : IRemoteImageProvider
     private readonly object _libraryMappingsCacheLock = new();
     private List<(string LibraryName, string RootPath)>? _cachedLibraryMappings;
     private DateTimeOffset _cachedLibraryMappingsExpiresAt = DateTimeOffset.MinValue;
-    private MethodInfo? _cachedGetItemListMethod;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ActorImageProvider"/> class.
@@ -298,62 +297,14 @@ public sealed class ActorImageProvider : IRemoteImageProvider
         }
     }
 
-    private IEnumerable<object> GetRelatedItemsForPerson(Guid personId)
+    private IReadOnlyList<BaseItem> GetRelatedItemsForPerson(Guid personId)
     {
-        // Use reflection for InternalItemsQuery/GetItemList to tolerate Jellyfin API changes across versions.
-        var queryType = Type.GetType("MediaBrowser.Controller.Entities.InternalItemsQuery, MediaBrowser.Controller");
-        if (queryType is null)
+        var query = new InternalItemsQuery
         {
-            _logger.LogWarning("未找到 InternalItemsQuery 类型，无法执行媒体库门控。");
-            return [];
-        }
-
-        var queryInstance = Activator.CreateInstance(queryType);
-        if (queryInstance is null)
-        {
-            _logger.LogWarning("无法创建 InternalItemsQuery 实例，无法执行媒体库门控。");
-            return [];
-        }
-
-        var personIdsProperty = queryType.GetProperty("PersonIds", BindingFlags.Public | BindingFlags.Instance);
-        personIdsProperty?.SetValue(queryInstance, new[] { personId });
-
-        var recursiveProperty = queryType.GetProperty("Recursive", BindingFlags.Public | BindingFlags.Instance);
-        recursiveProperty?.SetValue(queryInstance, true);
-
-        _cachedGetItemListMethod ??= ResolveGetItemListMethod(queryType);
-        if (_cachedGetItemListMethod is null)
-        {
-            _logger.LogWarning("未找到兼容的 GetItemList(InternalItemsQuery) 方法，无法执行媒体库门控。");
-            return [];
-        }
-
-        var result = _cachedGetItemListMethod.Invoke(_libraryManager, [queryInstance]);
-        if (result is IEnumerable enumerable)
-        {
-            return enumerable.Cast<object>();
-        }
-
-        return [];
-    }
-
-    private MethodInfo? ResolveGetItemListMethod(Type queryType)
-    {
-        foreach (var method in _libraryManager.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance))
-        {
-            if (!string.Equals(method.Name, "GetItemList", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            var parameters = method.GetParameters();
-            if (parameters.Length == 1 && parameters[0].ParameterType.IsAssignableFrom(queryType))
-            {
-                return method;
-            }
-        }
-
-        return null;
+            PersonIds = [personId],
+            Recursive = true
+        };
+        return _libraryManager.GetItemList(query);
     }
 
     private List<(string LibraryName, string RootPath)> GetOrBuildLibraryPathMappings()

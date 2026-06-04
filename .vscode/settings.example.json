@@ -5,6 +5,6 @@
     "jellyfinLinuxDataDir": "$HOME/.local/share/jellyfin",
     "jellyfinMacDataDir": "$HOME/Library/Application Support/jellyfin",
     "pluginName": "Jellyfin.Plugin.Tissue",
-    "pluginTargetFramework": "net8.0",
+    "pluginTargetFramework": "net9.0",
     "jellyfinTargetFramework": "net10.0"
 }
