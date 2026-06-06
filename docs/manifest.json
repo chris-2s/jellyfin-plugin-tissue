@@ -12,7 +12,7 @@
         "version": "1.1.0.0",
         "targetAbi": "10.11.0.0",
         "sourceUrl": "https://github.com/chris-2s/jellyfin-plugin-tissue/releases/download/v1.1.0.0/tissue_1.1.0.0.zip",
-        "checksum": "ec2ea62bac1c06af3b20248b8b80bb95",
+        "checksum": "132832affb2b8e3d4803633e78b227ec",
         "timestamp": "2026-06-06 00:00:00",
         "changelog": "聚焦定期任务补全演员头像，优化库范围扫描与任务结构整理。"
       },
