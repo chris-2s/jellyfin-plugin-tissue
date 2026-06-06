@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,6 +23,7 @@ public sealed class MissingActorImageBackfillTask : IScheduledTask, IConfigurabl
 {
     private readonly ILibraryManager _libraryManager;
     private readonly IActorImageResolveCache _actorImageResolveCache;
+    private readonly ITissueClient _tissueClient;
     private readonly IProviderManager _providerManager;
     private readonly ILogger<MissingActorImageBackfillTask> _logger;
 
@@ -30,16 +32,19 @@ public sealed class MissingActorImageBackfillTask : IScheduledTask, IConfigurabl
     /// </summary>
     /// <param name="libraryManager">The library manager.</param>
     /// <param name="actorImageResolveCache">The actor image resolve cache.</param>
+    /// <param name="tissueClient">The Tissue client.</param>
     /// <param name="providerManager">The provider manager.</param>
     /// <param name="logger">The logger.</param>
     public MissingActorImageBackfillTask(
         ILibraryManager libraryManager,
         IActorImageResolveCache actorImageResolveCache,
+        ITissueClient tissueClient,
         IProviderManager providerManager,
         ILogger<MissingActorImageBackfillTask> logger)
     {
         _libraryManager = libraryManager;
         _actorImageResolveCache = actorImageResolveCache;
+        _tissueClient = tissueClient;
         _providerManager = providerManager;
         _logger = logger;
     }
@@ -193,7 +198,12 @@ public sealed class MissingActorImageBackfillTask : IScheduledTask, IConfigurabl
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "计划任务补全演员 {PersonName} 头像失败。", person.Name);
+                _logger.LogWarning(
+                    ex,
+                    "计划任务补全演员 {PersonName} 头像失败。异常类型={ExceptionType}，消息={ExceptionMessage}",
+                    person.Name,
+                    ex.GetType().FullName,
+                    ex.Message);
             }
         }
     }
@@ -235,15 +245,87 @@ public sealed class MissingActorImageBackfillTask : IScheduledTask, IConfigurabl
             return false;
         }
 
-        await _providerManager.SaveImage(person, chosenImage.Url, ImageType.Primary, null, cancellationToken).ConfigureAwait(false);
+        await DownloadAndSavePrimaryImageAsync(person, config, chosenImage.Url, cancellationToken).ConfigureAwait(false);
+
+        var refreshedPerson = person.Id != Guid.Empty
+            ? _libraryManager.GetItemById<Person>(person.Id) ?? person
+            : person;
+        if (!HasPrimaryImage(refreshedPerson))
+        {
+            _logger.LogWarning(
+                "演员 {PersonName} 的 SaveImage 调用已完成，但未检测到 Primary 头像。候选地址={ImageUrl}，HasImage={HasImage}，PrimaryImagePath={PrimaryImagePath}，ImageInfoCount={ImageInfoCount}",
+                person.Name,
+                chosenImage.Url,
+                refreshedPerson.HasImage(ImageType.Primary, 0),
+                refreshedPerson.PrimaryImagePath,
+                refreshedPerson.ImageInfos.Length);
+            return false;
+        }
+
         _logger.LogInformation("已为演员 {PersonName} 保存 Tissue 头像。", person.Name);
         return true;
+    }
+
+    private async Task DownloadAndSavePrimaryImageAsync(
+        Person person,
+        PluginConfiguration config,
+        string imageUrl,
+        CancellationToken cancellationToken)
+    {
+        var proxyUrl = ToProxyImageUrl(config, imageUrl);
+        if (string.IsNullOrWhiteSpace(proxyUrl))
+        {
+            throw new InvalidOperationException("无法生成 Tissue 代理图片地址。");
+        }
+
+        using var response = await _tissueClient.GetImageResponseAsync(proxyUrl, cancellationToken).ConfigureAwait(false);
+        if (response is null)
+        {
+            throw new InvalidOperationException("Tissue 代理图片下载未返回有效响应。");
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"Tissue 代理图片下载失败，状态码={response.StatusCode}。");
+        }
+
+        var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        await using var configuredStream = stream.ConfigureAwait(false);
+        if (stream == Stream.Null)
+        {
+            throw new InvalidOperationException("Tissue 代理图片响应流为空。");
+        }
+
+        var mimeType = response.Content.Headers.ContentType?.MediaType;
+        if (string.IsNullOrWhiteSpace(mimeType))
+        {
+            mimeType = "image/jpeg";
+        }
+
+        await _providerManager.SaveImage(person, stream, mimeType, ImageType.Primary, null, cancellationToken).ConfigureAwait(false);
+        await _providerManager.SaveMetadataAsync(person, ItemUpdateType.ImageUpdate).ConfigureAwait(false);
+        await _libraryManager.UpdateItemAsync(
+            person,
+            person.GetTopParent() ?? person,
+            ItemUpdateType.ImageUpdate,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private static bool HasUsableTissueConfig(PluginConfiguration config)
     {
         return !string.IsNullOrWhiteSpace(config.BaseUrl)
             && !string.IsNullOrWhiteSpace(config.ApiKey);
+    }
+
+    private static string ToProxyImageUrl(PluginConfiguration config, string imageUrl)
+    {
+        if (string.IsNullOrWhiteSpace(config.BaseUrl) || string.IsNullOrWhiteSpace(imageUrl))
+        {
+            return string.Empty;
+        }
+
+        var baseAddress = config.BaseUrl.TrimEnd('/') + "/";
+        return baseAddress + "common/cover?url=" + Uri.EscapeDataString(imageUrl);
     }
 
     private bool ShouldAttemptPrimaryImageFill(Person person)
