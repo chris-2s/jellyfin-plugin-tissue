@@ -106,7 +106,7 @@ public sealed class ActorImageProvider : IRemoteImageProvider
         var candidates = resolvedImages
             .Select(image => new
             {
-                ProxyUrl = ToProxyImageUrl(config, image.Url),
+                ProxyUrl = _tissueClient.BuildProxyImageUrl(image.Url),
                 image.Width,
                 image.Height
             })
@@ -133,19 +133,11 @@ public sealed class ActorImageProvider : IRemoteImageProvider
 
     private async Task<HttpResponseMessage> GetImageResponseInternalAsync(string url, CancellationToken cancellationToken)
     {
-        var config = Plugin.Instance?.Configuration;
-        if (!TryValidateProxyUrl(config, url, out var proxyUri))
-        {
-            _logger.LogInformation("收到无效或非同源的 Tissue 代理地址，请求已拒绝。");
-            return new HttpResponseMessage(HttpStatusCode.NotFound);
-        }
-
         try
         {
-            var response = await _tissueClient.GetImageResponseAsync(proxyUri.AbsoluteUri, cancellationToken).ConfigureAwait(false);
-            if (response is null || !response.IsSuccessStatusCode || response.Content.Headers.ContentLength == 0)
+            var response = await _tissueClient.GetImageResponseAsync(url, cancellationToken).ConfigureAwait(false);
+            if (response is null)
             {
-                response?.Dispose();
                 return new HttpResponseMessage(HttpStatusCode.NotFound);
             }
 
@@ -161,49 +153,5 @@ public sealed class ActorImageProvider : IRemoteImageProvider
             _logger.LogWarning(ex, "Tissue 代理图片请求失败。");
             return new HttpResponseMessage(HttpStatusCode.NotFound);
         }
-    }
-
-    private static string ToProxyImageUrl(Configuration.PluginConfiguration config, string imageUrl)
-    {
-        if (string.IsNullOrWhiteSpace(config.BaseUrl))
-        {
-            return string.Empty;
-        }
-
-        var baseAddress = config.BaseUrl.TrimEnd('/') + "/";
-        return baseAddress + "common/cover?url=" + Uri.EscapeDataString(imageUrl);
-    }
-
-    private static bool TryValidateProxyUrl(Configuration.PluginConfiguration? config, string inputUrl, out Uri proxyUri)
-    {
-        proxyUri = null!;
-        if (config is null ||
-            string.IsNullOrWhiteSpace(config.BaseUrl) ||
-            string.IsNullOrWhiteSpace(inputUrl) ||
-            !Uri.TryCreate(inputUrl, UriKind.Absolute, out var candidateUri) ||
-            (candidateUri.Scheme != Uri.UriSchemeHttp && candidateUri.Scheme != Uri.UriSchemeHttps))
-        {
-            return false;
-        }
-
-        if (!Uri.TryCreate(config.BaseUrl.TrimEnd('/') + "/", UriKind.Absolute, out var baseUri))
-        {
-            return false;
-        }
-
-        var basePrefix = baseUri.AbsoluteUri;
-        if (!candidateUri.AbsoluteUri.StartsWith(basePrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var normalizedPath = candidateUri.AbsolutePath.TrimStart('/');
-        if (!normalizedPath.StartsWith("common/cover", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        proxyUri = candidateUri;
-        return true;
     }
 }

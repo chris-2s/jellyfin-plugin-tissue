@@ -19,10 +19,17 @@ public interface ITissueClient
     Task<IReadOnlyList<ResolvedActorImage>> ResolveActorImagesAsync(string actorName, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Build the Tissue proxy image URL for a remote image.
+    /// </summary>
+    /// <param name="imageUrl">Remote image URL.</param>
+    /// <returns>Resolved same-origin proxy URL, or empty on failure.</returns>
+    string BuildProxyImageUrl(string imageUrl);
+
+    /// <summary>
     /// Download actor image response from Tissue proxy endpoint.
     /// </summary>
-    /// <param name="proxyUrl">Resolved same-origin proxy URL.</param>
+    /// <param name="imageUrlOrProxyUrl">Remote image URL or resolved same-origin proxy URL.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>HTTP response with image stream, or <c>null</c> on failure.</returns>
-    Task<HttpResponseMessage?> GetImageResponseAsync(string proxyUrl, CancellationToken cancellationToken);
+    Task<HttpResponseMessage?> GetImageResponseAsync(string imageUrlOrProxyUrl, CancellationToken cancellationToken);
 }

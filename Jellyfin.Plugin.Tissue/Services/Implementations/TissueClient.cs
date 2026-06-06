@@ -109,7 +109,14 @@ public sealed class TissueClient : ITissueClient
     }
 
     /// <inheritdoc />
-    public async Task<HttpResponseMessage?> GetImageResponseAsync(string proxyUrl, CancellationToken cancellationToken)
+    public string BuildProxyImageUrl(string imageUrl)
+    {
+        var config = Plugin.Instance?.Configuration;
+        return BuildProxyImageUrl(config, imageUrl);
+    }
+
+    /// <inheritdoc />
+    public async Task<HttpResponseMessage?> GetImageResponseAsync(string imageUrlOrProxyUrl, CancellationToken cancellationToken)
     {
         var config = Plugin.Instance?.Configuration;
         if (config is null || string.IsNullOrWhiteSpace(config.BaseUrl))
@@ -118,8 +125,15 @@ public sealed class TissueClient : ITissueClient
             return null;
         }
 
+        var requestUrl = ResolveImageRequestUrl(config, imageUrlOrProxyUrl);
+        if (string.IsNullOrWhiteSpace(requestUrl))
+        {
+            _logger.LogInformation("图片内容请求地址无效，已跳过。");
+            return null;
+        }
+
         using var httpClient = CreateClient(config);
-        using var request = new HttpRequestMessage(HttpMethod.Get, proxyUrl);
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUrl);
 
         try
         {
@@ -174,9 +188,67 @@ public sealed class TissueClient : ITissueClient
         return client;
     }
 
+    private static string ResolveImageRequestUrl(Configuration.PluginConfiguration config, string imageUrlOrProxyUrl)
+    {
+        if (TryValidateProxyUrl(config, imageUrlOrProxyUrl, out var proxyUri))
+        {
+            return proxyUri.AbsoluteUri;
+        }
+
+        return BuildProxyImageUrl(config, imageUrlOrProxyUrl);
+    }
+
     private static string BuildActorSearchRelativeUrl(string actorName)
     {
         return "actor/?name=" + Uri.EscapeDataString(actorName);
+    }
+
+    private static string BuildProxyImageUrl(Configuration.PluginConfiguration? config, string imageUrl)
+    {
+        if (config is null ||
+            string.IsNullOrWhiteSpace(config.BaseUrl) ||
+            string.IsNullOrWhiteSpace(imageUrl) ||
+            !Uri.TryCreate(imageUrl, UriKind.Absolute, out var imageUri) ||
+            (imageUri.Scheme != Uri.UriSchemeHttp && imageUri.Scheme != Uri.UriSchemeHttps))
+        {
+            return string.Empty;
+        }
+
+        var baseAddress = config.BaseUrl.TrimEnd('/') + "/";
+        return baseAddress + "common/cover?url=" + Uri.EscapeDataString(imageUri.AbsoluteUri);
+    }
+
+    private static bool TryValidateProxyUrl(Configuration.PluginConfiguration? config, string inputUrl, out Uri proxyUri)
+    {
+        proxyUri = null!;
+        if (config is null ||
+            string.IsNullOrWhiteSpace(config.BaseUrl) ||
+            string.IsNullOrWhiteSpace(inputUrl) ||
+            !Uri.TryCreate(inputUrl, UriKind.Absolute, out var candidateUri) ||
+            (candidateUri.Scheme != Uri.UriSchemeHttp && candidateUri.Scheme != Uri.UriSchemeHttps))
+        {
+            return false;
+        }
+
+        if (!Uri.TryCreate(config.BaseUrl.TrimEnd('/') + "/", UriKind.Absolute, out var baseUri))
+        {
+            return false;
+        }
+
+        var basePrefix = baseUri.AbsoluteUri;
+        if (!candidateUri.AbsoluteUri.StartsWith(basePrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var normalizedPath = candidateUri.AbsolutePath.TrimStart('/');
+        if (!normalizedPath.StartsWith("common/cover", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        proxyUri = candidateUri;
+        return true;
     }
 
     private static ResolvedActorImage[] ReorderByResolution(IList<ActorSearchItem> items, bool preferHighResolution)

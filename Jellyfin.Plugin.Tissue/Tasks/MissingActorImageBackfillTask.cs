@@ -21,6 +21,7 @@ namespace Jellyfin.Plugin.Tissue.Tasks;
 /// </summary>
 public sealed class MissingActorImageBackfillTask : IScheduledTask, IConfigurableScheduledTask
 {
+    private static readonly TimeSpan ActorScrapeDelay = TimeSpan.FromSeconds(10);
     private readonly ILibraryManager _libraryManager;
     private readonly IActorImageResolveCache _actorImageResolveCache;
     private readonly ITissueClient _tissueClient;
@@ -50,7 +51,7 @@ public sealed class MissingActorImageBackfillTask : IScheduledTask, IConfigurabl
     }
 
     /// <inheritdoc />
-    public string Name => "Tissue Missing Actor Image Backfill";
+    public string Name => "Tissue演员头像补全";
 
     /// <inheritdoc />
     public string Key => "TissueMissingActorImageBackfill";
@@ -205,6 +206,8 @@ public sealed class MissingActorImageBackfillTask : IScheduledTask, IConfigurabl
                     ex.GetType().FullName,
                     ex.Message);
             }
+
+            await Task.Delay(ActorScrapeDelay, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -245,22 +248,7 @@ public sealed class MissingActorImageBackfillTask : IScheduledTask, IConfigurabl
             return false;
         }
 
-        await DownloadAndSavePrimaryImageAsync(person, config, chosenImage.Url, cancellationToken).ConfigureAwait(false);
-
-        var refreshedPerson = person.Id != Guid.Empty
-            ? _libraryManager.GetItemById<Person>(person.Id) ?? person
-            : person;
-        if (!HasPrimaryImage(refreshedPerson))
-        {
-            _logger.LogWarning(
-                "演员 {PersonName} 的 SaveImage 调用已完成，但未检测到 Primary 头像。候选地址={ImageUrl}，HasImage={HasImage}，PrimaryImagePath={PrimaryImagePath}，ImageInfoCount={ImageInfoCount}",
-                person.Name,
-                chosenImage.Url,
-                refreshedPerson.HasImage(ImageType.Primary, 0),
-                refreshedPerson.PrimaryImagePath,
-                refreshedPerson.ImageInfos.Length);
-            return false;
-        }
+        await DownloadAndSavePrimaryImageAsync(person, chosenImage.Url, cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation("已为演员 {PersonName} 保存 Tissue 头像。", person.Name);
         return true;
@@ -268,25 +256,13 @@ public sealed class MissingActorImageBackfillTask : IScheduledTask, IConfigurabl
 
     private async Task DownloadAndSavePrimaryImageAsync(
         Person person,
-        PluginConfiguration config,
         string imageUrl,
         CancellationToken cancellationToken)
     {
-        var proxyUrl = ToProxyImageUrl(config, imageUrl);
-        if (string.IsNullOrWhiteSpace(proxyUrl))
-        {
-            throw new InvalidOperationException("无法生成 Tissue 代理图片地址。");
-        }
-
-        using var response = await _tissueClient.GetImageResponseAsync(proxyUrl, cancellationToken).ConfigureAwait(false);
+        using var response = await _tissueClient.GetImageResponseAsync(imageUrl, cancellationToken).ConfigureAwait(false);
         if (response is null)
         {
             throw new InvalidOperationException("Tissue 代理图片下载未返回有效响应。");
-        }
-
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException($"Tissue 代理图片下载失败，状态码={response.StatusCode}。");
         }
 
         var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
@@ -303,7 +279,6 @@ public sealed class MissingActorImageBackfillTask : IScheduledTask, IConfigurabl
         }
 
         await _providerManager.SaveImage(person, stream, mimeType, ImageType.Primary, null, cancellationToken).ConfigureAwait(false);
-        await _providerManager.SaveMetadataAsync(person, ItemUpdateType.ImageUpdate).ConfigureAwait(false);
         await _libraryManager.UpdateItemAsync(
             person,
             person.GetTopParent() ?? person,
@@ -315,17 +290,6 @@ public sealed class MissingActorImageBackfillTask : IScheduledTask, IConfigurabl
     {
         return !string.IsNullOrWhiteSpace(config.BaseUrl)
             && !string.IsNullOrWhiteSpace(config.ApiKey);
-    }
-
-    private static string ToProxyImageUrl(PluginConfiguration config, string imageUrl)
-    {
-        if (string.IsNullOrWhiteSpace(config.BaseUrl) || string.IsNullOrWhiteSpace(imageUrl))
-        {
-            return string.Empty;
-        }
-
-        var baseAddress = config.BaseUrl.TrimEnd('/') + "/";
-        return baseAddress + "common/cover?url=" + Uri.EscapeDataString(imageUrl);
     }
 
     private bool ShouldAttemptPrimaryImageFill(Person person)

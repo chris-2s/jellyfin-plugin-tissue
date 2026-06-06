@@ -129,7 +129,12 @@ public sealed class ActorImageResolveCacheTests
             return Resolve(actorName, cancellationToken);
         }
 
-        public Task<HttpResponseMessage?> GetImageResponseAsync(string proxyUrl, CancellationToken cancellationToken)
+        public string BuildProxyImageUrl(string imageUrl)
+        {
+            return imageUrl;
+        }
+
+        public Task<HttpResponseMessage?> GetImageResponseAsync(string imageUrlOrProxyUrl, CancellationToken cancellationToken)
         {
             return Task.FromResult<HttpResponseMessage?>(null);
         }
