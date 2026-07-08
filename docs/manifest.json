@@ -9,6 +9,14 @@
     "imageUrl": "https://chris-2s.github.io/jellyfin-plugin-tissue/jellyfin-plugin-tissue.jpg",
     "versions": [
       {
+        "version": "1.1.0.1",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/chris-2s/jellyfin-plugin-tissue/releases/download/v1.1.0.1/tissue_1.1.0.1.zip",
+        "checksum": "aa751ec6e5b3f46ea91f9c7d60675b68",
+        "timestamp": "2026-07-08 00:00:00",
+        "changelog": "修复 Tissue 图片代理接口调整导致的演员头像下载失败。"
+      },
+      {
         "version": "1.1.0.0",
         "targetAbi": "10.11.0.0",
         "sourceUrl": "https://github.com/chris-2s/jellyfin-plugin-tissue/releases/download/v1.1.0.0/tissue_1.1.0.0.zip",

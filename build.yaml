@@ -1,7 +1,7 @@
 ---
 name: "Tissue"
 guid: "eb5d7894-8eef-4b36-aa6f-5d124e828ce1"
-version: "1.1.0.0"
+version: "1.1.0.1"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "为 Jellyfin 提供演员头像补全"
@@ -13,4 +13,5 @@ owner: "Tissue 团队"
 artifacts:
 - "Jellyfin.Plugin.Tissue.dll"
 changelog: >
+  1.1.0.1：修复 Tissue 图片代理接口调整导致的演员头像下载失败。
   1.1.0.0：聚焦定期任务补全演员头像，优化库范围扫描与任务结构整理。
