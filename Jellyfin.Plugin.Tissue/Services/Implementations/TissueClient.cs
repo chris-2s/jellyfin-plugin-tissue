@@ -215,7 +215,7 @@ public sealed class TissueClient : ITissueClient
         }
 
         var baseAddress = config.BaseUrl.TrimEnd('/') + "/";
-        return baseAddress + "common/cover?url=" + Uri.EscapeDataString(imageUri.AbsoluteUri);
+        return baseAddress + "common/image?url=" + Uri.EscapeDataString(imageUri.AbsoluteUri) + "&image_type=avatar";
     }
 
     private static bool TryValidateProxyUrl(Configuration.PluginConfiguration? config, string inputUrl, out Uri proxyUri)
@@ -242,7 +242,7 @@ public sealed class TissueClient : ITissueClient
         }
 
         var normalizedPath = candidateUri.AbsolutePath.TrimStart('/');
-        if (!normalizedPath.StartsWith("common/cover", StringComparison.OrdinalIgnoreCase))
+        if (!normalizedPath.StartsWith("common/image", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
